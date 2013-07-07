@@ -180,7 +180,19 @@ cmp_char_cs:	let result = 65535;
 (* case-insensitive character compare *)
 cmp_char:
 cmp_char_ci:	let result = 65535;
-		return if (ch1 & 95)=(ch2 & 95) if isletter(ch1) if isletter(ch2);
+		goto ch1_not_letter if (ch1-65)&32768;
+		goto ch1_letter if (ch1-91)&32768;
+		goto ch1_not_letter if (ch1-96)&32768;
+		goto ch1_letter if (ch1-112)&32768;
+ch1_not_letter:	let ch1_is_letter = 0; goto try_ch2;
+ch1_letter:	let ch1_is_letter = 65535
+try_ch2:	goto ch2_not_letter if (ch2-65)&32768;
+		goto ch2_letter if (ch2-91)&32768;
+		goto ch2_not_letter if (ch2-96)&32768;
+		goto ch2_letter if (ch2-112)&32768;
+ch2_not_letter:	let ch2_is_letter = 0; goto char_compare;
+ch2_letter:	let ch2_is_letter = 65535
+char_compare:	return if (ch1 & 95)=(ch2 & 95) if ch1_is_letter & ch2_is_letter;
 		let result = 0; return
 
 (* main entry point for character compare *)
