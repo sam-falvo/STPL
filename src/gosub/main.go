@@ -8,14 +8,13 @@ import (
 	"os"
 )
 
-// Keywords
-var keywords = []string{
-  "var", "func", "return",
+var types = []string{
+  "int", "byte",
 }
 
 // Token represents the "union type" of all kinds of tokens that can be found in the source file(s).
 type Token interface{
-  ParseStatement(*tokUnit) error
+  ParseStatement(*tokUnit, *Tokenizer) error
 }
 
 type tokChar struct {
@@ -28,11 +27,30 @@ type tokPlus struct {
 type tokComma struct {
 }
 
+type tokSemi struct {
+}
+
+type tokOpenBrace struct {
+}
+
+type tokCloseBrace struct {
+}
+
 type tokId struct {
 	name string
 }
 
+type tokType struct {
+  name string
+}
+
 type tokVAR struct {
+}
+
+type tokFUNC struct {
+}
+
+type tokRETURN struct {
 }
 
 type tokSpace struct {
@@ -45,9 +63,13 @@ type tokUnit struct {
 }
 
 type tokVar struct {
+  names []string
+  typename string
 }
 
 type tokFunc struct {
+  name string
+  returns *tokType
 }
 
 // How tokens of various types handle being used as a statement.
@@ -56,41 +78,217 @@ func IllegalStatement(t Token) error {
   return fmt.Errorf("Illegal statement token: %#v", t)
 }
 
-func (t *tokChar) ParseStatement(_ *tokUnit) error {
+func (t *tokChar) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokPlus) ParseStatement(_ *tokUnit) error {
+func (t *tokPlus) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokComma) ParseStatement(_ *tokUnit) error {
+func (t *tokComma) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokId) ParseStatement(_ *tokUnit) error {
+func (t *tokOpenBrace) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokSpace) ParseStatement(_ *tokUnit) error {
-  // whitespace does nothing in the statement context.
+func (t *tokCloseBrace) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokSemi) ParseStatement(_ *tokUnit, tt *Tokenizer) error {
+  tt.Next()
   return nil
 }
 
-func (t *tokUnit) ParseStatement(_ *tokUnit) error {
+func (t *tokType) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokVar) ParseStatement(_ *tokUnit) error {
+func (t *tokId) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokFunc) ParseStatement(_ *tokUnit) error {
+func (t *tokSpace) ParseStatement(_ *tokUnit, tt *Tokenizer) error {
+  tt.Next()
+  return nil
+}
+
+func (t *tokUnit) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
 }
 
-func (t *tokVAR) ParseStatement(_ *tokUnit) error {
+func (t *tokVar) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
   return IllegalStatement(t)
+}
+
+func (t *tokFunc) ParseStatement(_ *tokUnit, _ *Tokenizer) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokVAR) ParseStatement(u *tokUnit, tt *Tokenizer) error {
+  tt.Next() // eat "var"
+
+  tv := tokVar{
+    names: make([]string, 0),
+  }
+
+  for (tt.Error == nil) {
+    _, ok := tt.Token.(*tokSemi)
+    if ok {
+      tt.Next()
+      break
+    }
+
+    id, ok := tt.Token.(*tokId)
+    if ok {
+      tv.names = append(tv.names, id.name)
+      tt.Next()
+      continue
+    }
+
+    _, ok = tt.Token.(*tokComma)
+    if ok {
+      tt.Next()
+      continue
+    }
+
+    tn, ok := tt.Token.(*tokType)
+    if ok {
+      tv.typename = tn.name
+      tt.Next()
+      continue
+    }
+
+    _, ok = tt.Token.(*tokSpace)
+    if ok {
+      tt.Next()
+      continue
+    }
+  }
+
+  if len(tv.names) > 0 {
+    u.vars = append(u.vars, tv)
+  }
+
+  return tt.Error
+}
+
+func skipSpaces(tt *Tokenizer) error {
+  _, isWS := tt.Token.(*tokSpace)
+  for isWS && (tt.Error == nil) {
+    tt.Next()
+    _, isWS = tt.Token.(*tokSpace)
+  }
+  return tt.Error
+}
+
+func getId(tt *Tokenizer) (string, error) {
+  err := skipSpaces(tt)
+  if err != nil {
+    return "", err
+  }
+
+  i, isId := tt.Token.(*tokId)
+  if !isId {
+    return "", fmt.Errorf("Expected function name; got %#v", tt.Token)
+  }
+  tt.Next()
+  return i.name, nil
+}
+
+func getOptType(tt *Tokenizer) (*tokType, error) {
+  typ := &tokType{}
+
+  err := skipSpaces(tt)
+  if err != nil {
+    return typ, err
+  }
+
+  t, isType := tt.Token.(*tokType)
+  if !isType {
+    return typ, nil
+  }
+  tt.Next()
+  return t, nil
+}
+
+func expectOpenBrace(tt *Tokenizer) error {
+  err := skipSpaces(tt)
+  if err != nil {
+    return err
+  }
+  _, brace := tt.Token.(*tokOpenBrace)
+  if !brace {
+    return fmt.Errorf("Syntax error: expected {, but got %#v", tt.Token)
+  }
+  tt.Next() // eat "{"
+  return nil
+}
+
+func expectCloseBrace(tt *Tokenizer) error {
+  err := skipSpaces(tt)
+  if err != nil {
+    return err
+  }
+  _, brace := tt.Token.(*tokCloseBrace)
+  if !brace {
+    return fmt.Errorf("Syntax error: expected }, but got %#v", tt.Token)
+  }
+  tt.Next() // eat "}"
+  return nil
+}
+
+func (t *tokFUNC) ParseStatement(u *tokUnit, tt *Tokenizer) error {
+  tt.Next() // eat "func"
+
+  funcName, err := getId(tt)
+  if err != nil {
+    return err
+  }
+  funcType, err := getOptType(tt)
+  err = expectOpenBrace(tt)
+  if err != nil {
+    return err
+  }
+	for tt.Error == nil {
+    err := skipSpaces(tt)
+    if err != nil {
+      return err
+    }
+    _, isEnd := tt.Token.(*tokCloseBrace)
+    if isEnd {
+      break
+    }
+		err = tt.Token.ParseStatement(u, tt)
+		if err != nil {
+			return err
+		}
+	}
+  err = expectCloseBrace(tt)
+  if err != nil {
+    return err
+  }
+  u.funcs = append(u.funcs, tokFunc{name: funcName, returns: funcType})
+  return tt.Error
+}
+
+func (t *tokRETURN) ParseStatement(u *tokUnit, tt *Tokenizer) error {
+  tt.Next() // eat "return"
+
+  err := skipSpaces(tt)
+  if err != nil {
+    return err
+  }
+  _, isSemi := tt.Token.(*tokSemi)
+  for !isSemi {
+    tt.Next()
+    _, isSemi = tt.Token.(*tokSemi)
+  }
+  tt.Next() // eat ";"
+  return nil
 }
 
 // Tokenizer is a state machine which takes raw source input and produces one or more Tokens as output.
@@ -116,21 +314,21 @@ func NewTokenizer(unit io.Reader) (*Tokenizer, error) {
 	return tokenizer, tokenizer.Error
 }
 
-// isKeyword yields true if the identifier named is really a keyword of the language.
-func isKeyword(name string) bool {
-  for _, x := range keywords {
-    if name == x {
-      return true
-    }
-  }
-  return false
-}
-
 // recognizeIdentifier attempts to classify the kind of identifier token you received.
 func recognizeIdentifier(id *tokId) Token {
   switch id.name {
   case "var":
     return &tokVAR{}
+  case "func":
+    return &tokFUNC{}
+  case "return":
+    return &tokRETURN{}
+
+  case "int":
+    fallthrough
+  case "byte":
+    return &tokType{name: id.name}
+
   default:
     return id
   }
@@ -191,11 +389,20 @@ func (t *Tokenizer) Next() {
     t.Token = recognizeIdentifier(t.Token.(*tokId))
 	case isWhitespace(t.Byte[0]):
 		t.Token = t.readWhitespace()
+	case t.Byte[0] == '{':
+		t.Token = &tokOpenBrace{}
+		t.NextByte()
+	case t.Byte[0] == '}':
+		t.Token = &tokCloseBrace{}
+		t.NextByte()
 	case t.Byte[0] == ',':
 		t.Token = &tokComma{}
 		t.NextByte()
 	case t.Byte[0] == '+':
 		t.Token = &tokPlus{}
+		t.NextByte()
+	case t.Byte[0] == ';':
+		t.Token = &tokSemi{}
 		t.NextByte()
 	default:
 		t.Token = &tokChar{ch: t.Byte[0]}
@@ -229,8 +436,12 @@ func compile(unit io.Reader) (Token, error) {
 		return nil, err
 	}
 	for tok.Error == nil {
-		err := tok.Token.ParseStatement(program)
-		if err != nil {
+    err := skipSpaces(tok)
+    if (err != nil) && (err != io.EOF) {
+      return nil, err
+    }
+		err = tok.Token.ParseStatement(program, tok)
+		if (err != nil) && (err != io.EOF) {
 			return nil, err
 		}
 	}
@@ -257,9 +468,10 @@ func main() {
 		log.Fatal("At least one source file is required.")
 	}
 	for _, s := range sources {
-		_, err := compileFile(s)
+		o, err := compileFile(s)
 		if err != nil {
 			log.Fatalf("%s: %s", os.Args[0], err)
 		}
+    log.Printf("Output\n\n%#v", o)
 	}
 }
