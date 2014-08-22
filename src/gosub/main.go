@@ -8,13 +8,7 @@ import (
 	"os"
 )
 
-type Tokenizer struct {
-	Unit  io.Reader
-	Byte  []byte
-	Error error
-	Token
-}
-
+// Token represents the "union type" of all kinds of tokens that can be found in the source file(s).
 type Token interface{}
 
 type tokChar struct {
@@ -35,6 +29,19 @@ type tokSpace struct {
 	space []byte
 }
 
+// Tokenizer is a state machine which takes raw source input and produces one or more Tokens as output.
+type Tokenizer struct {
+	// Unit represents the current source file (compilation "unit").
+	Unit io.Reader
+	// Byte is the next byte from the source file, assuming Error == nil.  Undefined otherwise.
+	Byte []byte
+	// Error records the most recent error encountered when processing the source file.
+	Error error
+	// Token is the most recently read token.
+	Token
+}
+
+// NewTokenizer creates a new tokenizing state machine instance.
 func NewTokenizer(unit io.Reader) (*Tokenizer, error) {
 	tokenizer := &Tokenizer{
 		Unit: unit,
@@ -45,18 +52,10 @@ func NewTokenizer(unit io.Reader) (*Tokenizer, error) {
 	return tokenizer, tokenizer.Error
 }
 
-func startsIdentifier(b byte) bool {
-	return (('a' <= b) && (b <= 'z')) || (('A' <= b) && (b <= 'Z')) || (b == '_')
-}
-
-func stillIdentifier(b byte) bool {
-	return startsIdentifier(b) || (('0' <= b) && (b <= '9'))
-}
-
-func startsWhitespace(b byte) bool {
-	return b <= 0x20
-}
-
+// readIdentifier will return a single identifier token.
+// Beware: the identifier returned may be a never-before-seen identifier, a previously defined/declared identifier, or even a keyword.
+// This function makes no attempt to distinguish between these.
+// See also recognizeIdentifier().
 func (t *Tokenizer) readIdentifier() *tokId {
 	name := make([]byte, 1)
 	name[0] = t.Byte[0]
@@ -70,12 +69,13 @@ func (t *Tokenizer) readIdentifier() *tokId {
 	return &tokId{string(name)}
 }
 
+// readWhitespace will return a single whitespace token containing all available whitespace until the next token.
 func (t *Tokenizer) readWhitespace() *tokSpace {
 	spaces := make([]byte, 1)
 	spaces[0] = t.Byte[0]
 	for t.Error == nil {
 		t.NextByte()
-		if !startsWhitespace(t.Byte[0]) {
+		if !isWhitespace(t.Byte[0]) {
 			break
 		}
 		spaces = append(spaces, t.Byte[0])
@@ -83,6 +83,8 @@ func (t *Tokenizer) readWhitespace() *tokSpace {
 	return &tokSpace{spaces}
 }
 
+// NextByte reads in the next byte from the input stream.
+// This does not affect the current setting for Token.
 func (t *Tokenizer) NextByte() {
 	n := 0
 	n, t.Error = t.Unit.Read(t.Byte)
@@ -94,6 +96,7 @@ func (t *Tokenizer) NextByte() {
 	}
 }
 
+// Next reads in the next token from the input stream.
 func (t *Tokenizer) Next() {
 	if t.Error != nil {
 		return
@@ -101,7 +104,7 @@ func (t *Tokenizer) Next() {
 	switch {
 	case startsIdentifier(t.Byte[0]):
 		t.Token = t.readIdentifier()
-	case startsWhitespace(t.Byte[0]):
+	case isWhitespace(t.Byte[0]):
 		t.Token = t.readWhitespace()
 	case t.Byte[0] == ',':
 		t.Token = &tokComma{}
@@ -115,6 +118,21 @@ func (t *Tokenizer) Next() {
 	}
 }
 
+// Character class utilities.
+
+func startsIdentifier(b byte) bool {
+	return (('a' <= b) && (b <= 'z')) || (('A' <= b) && (b <= 'Z')) || (b == '_')
+}
+
+func stillIdentifier(b byte) bool {
+	return startsIdentifier(b) || (('0' <= b) && (b <= '9'))
+}
+
+func isWhitespace(b byte) bool {
+	return b <= 0x20
+}
+
+// compile will compile a single translation unit, expressed as an io.Reader.
 func compile(unit io.Reader) error {
 	tok, err := NewTokenizer(unit)
 	if err != nil {
@@ -130,6 +148,7 @@ func compile(unit io.Reader) error {
 	return tok.Error
 }
 
+// compileFile will compile a single file, identified by filename.
 func compileFile(filename string) error {
 	file, err := os.Open(filename)
 	if err != nil {
