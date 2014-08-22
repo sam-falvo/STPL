@@ -8,8 +8,15 @@ import (
 	"os"
 )
 
+// Keywords
+var keywords = []string{
+  "var", "func", "return",
+}
+
 // Token represents the "union type" of all kinds of tokens that can be found in the source file(s).
-type Token interface{}
+type Token interface{
+  ParseStatement(*tokUnit) error
+}
 
 type tokChar struct {
 	ch byte
@@ -25,8 +32,65 @@ type tokId struct {
 	name string
 }
 
+type tokVAR struct {
+}
+
 type tokSpace struct {
 	space []byte
+}
+
+type tokUnit struct {
+	vars []tokVar
+	funcs []tokFunc
+}
+
+type tokVar struct {
+}
+
+type tokFunc struct {
+}
+
+// How tokens of various types handle being used as a statement.
+
+func IllegalStatement(t Token) error {
+  return fmt.Errorf("Illegal statement token: %#v", t)
+}
+
+func (t *tokChar) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokPlus) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokComma) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokId) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokSpace) ParseStatement(_ *tokUnit) error {
+  // whitespace does nothing in the statement context.
+  return nil
+}
+
+func (t *tokUnit) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokVar) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokFunc) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
+}
+
+func (t *tokVAR) ParseStatement(_ *tokUnit) error {
+  return IllegalStatement(t)
 }
 
 // Tokenizer is a state machine which takes raw source input and produces one or more Tokens as output.
@@ -52,6 +116,26 @@ func NewTokenizer(unit io.Reader) (*Tokenizer, error) {
 	return tokenizer, tokenizer.Error
 }
 
+// isKeyword yields true if the identifier named is really a keyword of the language.
+func isKeyword(name string) bool {
+  for _, x := range keywords {
+    if name == x {
+      return true
+    }
+  }
+  return false
+}
+
+// recognizeIdentifier attempts to classify the kind of identifier token you received.
+func recognizeIdentifier(id *tokId) Token {
+  switch id.name {
+  case "var":
+    return &tokVAR{}
+  default:
+    return id
+  }
+}
+
 // readIdentifier will return a single identifier token.
 // Beware: the identifier returned may be a never-before-seen identifier, a previously defined/declared identifier, or even a keyword.
 // This function makes no attempt to distinguish between these.
@@ -66,7 +150,7 @@ func (t *Tokenizer) readIdentifier() *tokId {
 		}
 		name = append(name, t.Byte[0])
 	}
-	return &tokId{string(name)}
+	return &tokId{name: string(name)}
 }
 
 // readWhitespace will return a single whitespace token containing all available whitespace until the next token.
@@ -80,7 +164,7 @@ func (t *Tokenizer) readWhitespace() *tokSpace {
 		}
 		spaces = append(spaces, t.Byte[0])
 	}
-	return &tokSpace{spaces}
+	return &tokSpace{space: spaces}
 }
 
 // NextByte reads in the next byte from the input stream.
@@ -104,6 +188,7 @@ func (t *Tokenizer) Next() {
 	switch {
 	case startsIdentifier(t.Byte[0]):
 		t.Token = t.readIdentifier()
+    t.Token = recognizeIdentifier(t.Token.(*tokId))
 	case isWhitespace(t.Byte[0]):
 		t.Token = t.readWhitespace()
 	case t.Byte[0] == ',':
@@ -113,7 +198,7 @@ func (t *Tokenizer) Next() {
 		t.Token = &tokPlus{}
 		t.NextByte()
 	default:
-		t.Token = &tokChar{t.Byte[0]}
+		t.Token = &tokChar{ch: t.Byte[0]}
 		t.NextByte()
 	}
 }
@@ -133,26 +218,33 @@ func isWhitespace(b byte) bool {
 }
 
 // compile will compile a single translation unit, expressed as an io.Reader.
-func compile(unit io.Reader) error {
+// The compiled translation unit will be returned as a single tokUnit token.
+func compile(unit io.Reader) (Token, error) {
+	program := &tokUnit{
+		vars: make([]tokVar, 0),
+		funcs: make([]tokFunc, 0),
+	}
 	tok, err := NewTokenizer(unit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for tok.Error == nil {
-		log.Printf("Token: %#v", tok.Token)
-		tok.Next()
+		err := tok.Token.ParseStatement(program)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if tok.Error == io.EOF {
-		return nil
+		return program, nil
 	}
-	return tok.Error
+	return program, tok.Error
 }
 
 // compileFile will compile a single file, identified by filename.
-func compileFile(filename string) error {
+func compileFile(filename string) (Token, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
 	return compile(file)
@@ -165,7 +257,7 @@ func main() {
 		log.Fatal("At least one source file is required.")
 	}
 	for _, s := range sources {
-		err := compileFile(s)
+		_, err := compileFile(s)
 		if err != nil {
 			log.Fatalf("%s: %s", os.Args[0], err)
 		}
