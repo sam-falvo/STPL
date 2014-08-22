@@ -1,0 +1,4 @@
+var x, y int;
+func sum int {
+  return x+y;
+}
