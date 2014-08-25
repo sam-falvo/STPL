@@ -1,5 +1,5 @@
 var x, y int;
 var a, b, c byte;
 func sum int {
-  return x+y;
+  return x+y+c+b+a;
 }
