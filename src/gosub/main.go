@@ -8,12 +8,23 @@ import (
 	"os"
 )
 
-var types = []string{
-	"int", "byte",
+// TypeDesc describes a type at a relatively lower level.
+type TypeDesc struct {
+	name string
+	size int
+	kind int
 }
 
+const (
+	VoidKind = 1 << iota
+	IntKind
+	ByteKind
+)
+
+var types []*TypeDesc
+
 // The complete set of tokens this language supports.
-type Token interface {}
+type Token interface{}
 
 // Some tokens can be used to denote entire statements.
 type Statementer interface {
@@ -27,7 +38,7 @@ type Infixer interface {
 
 // Some tokens can be used to start an expression.
 type Expressioner interface {
-  ParseExpression(*Tokenizer) error
+	ParseExpression(*Tokenizer) error
 }
 
 // Specific kinds of tokens hold state/data relevant to them.
@@ -56,7 +67,7 @@ type tokId struct {
 }
 
 type tokType struct {
-	name string
+	T *TypeDesc
 }
 
 type tokVAR struct {
@@ -129,11 +140,11 @@ func IllegalStatement(t Token) error {
 }
 
 func (t *Tokenizer) doStatement() error {
-  s, isStmt := t.Token.(Statementer)
-  if !isStmt {
-    return IllegalStatement(t.Token)
-  }
-  return s.ParseStatement(t)
+	s, isStmt := t.Token.(Statementer)
+	if !isStmt {
+		return IllegalStatement(t.Token)
+	}
+	return s.ParseStatement(t)
 }
 
 func (t *tokSemi) ParseStatement(tt *Tokenizer) error {
@@ -167,7 +178,7 @@ func (t *tokVAR) ParseStatement(tt *Tokenizer) error {
 
 		tn, ok := tt.Token.(*tokType)
 		if ok {
-			switch tn.name {
+			switch tn.T.name {
 			case "int":
 				for _, n := range names {
 					tt.cg.DeclareInt(n)
@@ -215,16 +226,14 @@ func getId(tt *Tokenizer) (string, error) {
 }
 
 func getOptType(tt *Tokenizer) (*tokType, error) {
-	typ := &tokType{}
-
 	err := skipSpaces(tt)
 	if err != nil {
-		return typ, err
+		return nil, err
 	}
 
 	t, isType := tt.Token.(*tokType)
 	if !isType {
-		return typ, nil
+		return nil, nil
 	}
 	tt.Next()
 	return t, nil
@@ -278,7 +287,7 @@ func (t *tokFUNC) ParseStatement(tt *Tokenizer) error {
 		if isEnd {
 			break
 		}
-    err = tt.doStatement()
+		err = tt.doStatement()
 		if err != nil {
 			return err
 		}
@@ -363,12 +372,12 @@ func recognizeIdentifier(id *tokId, cg *CG) Token {
 	case "return":
 		return &tokRETURN{}
 
-	case "int":
-		fallthrough
-	case "byte":
-		return &tokType{name: id.name}
-
 	default:
+		for _, t := range types {
+			if t.name == id.name {
+				return &tokType{T: t}
+			}
+		}
 		for _, v := range cg.vars {
 			if v == id.name {
 				return &tokVar{name: id.name}
@@ -502,6 +511,22 @@ func compileFile(filename string, cg *CG) error {
 }
 
 func main() {
+	types = make([]*TypeDesc, 3)
+	types[0] = &TypeDesc{
+		name: "void",
+		size: 0,
+		kind: VoidKind,
+	}
+	types[1] = &TypeDesc{
+		name: "int",
+		size: 2,
+		kind: IntKind,
+	}
+	types[2] = &TypeDesc{
+		name: "byte",
+		size: 1,
+		kind: ByteKind,
+	}
 	flag.Parse()
 	sources := flag.Args()
 	if len(sources) < 1 {
