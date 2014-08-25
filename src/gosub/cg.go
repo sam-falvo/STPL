@@ -9,9 +9,14 @@ const (
 	IN_DATA
 )
 
+type VarDesc struct {
+	name	string
+	T	*TypeDesc
+}
+
 type CG struct {
 	in   int
-	vars []string
+	vars []*VarDesc
 }
 
 func (cg *CG) InData() {
@@ -33,22 +38,35 @@ func (cg *CG) Add() {
 	log.Printf("    ADD")
 }
 
-func (cg *CG) FetchVar(name string) {
+func (cg *CG) FetchVar(v *VarDesc) {
 	cg.InCode()
-	log.Printf("    LIT _%s", name)
-	log.Printf("    FWM")
+	log.Printf("    LIT _%s", v.name)
+  switch {
+  case v.T.kind & IntKind != 0:
+    log.Printf("    FWM")
+  case v.T.kind & ByteKind != 0:
+    log.Printf("    FBM")
+  }
 }
 
 func (cg *CG) DeclareInt(name string) {
 	cg.InData()
 	log.Printf("_%s: DCW 0", name)
-	cg.vars = append(cg.vars, name)
+	vd := &VarDesc {
+		name: name,
+		T: findTypeDesc("int"),
+	}
+	cg.vars = append(cg.vars, vd)
 }
 
 func (cg *CG) DeclareByte(name string) {
 	cg.InData()
 	log.Printf("_%s: DCB 0", name)
-	cg.vars = append(cg.vars, name)
+	vd := &VarDesc {
+		name: name,
+		T: findTypeDesc("byte"),
+	}
+	cg.vars = append(cg.vars, vd)
 }
 
 func (cg *CG) DeclareFunc(name string) {

@@ -23,6 +23,15 @@ const (
 
 var types []*TypeDesc
 
+func findTypeDesc(name string) *TypeDesc {
+  for _, t := range types {
+    if t.name == name {
+      return t
+    }
+  }
+  panic("Attempt to find unknown type deep inside the compiler.")
+}
+
 // The complete set of tokens this language supports.
 type Token interface{}
 
@@ -84,7 +93,7 @@ type tokSpace struct {
 }
 
 type tokVar struct {
-	name string
+	varDesc *VarDesc
 }
 
 type tokFunc struct {
@@ -128,7 +137,7 @@ func (t *tokSemi) ParseExpression(tt *Tokenizer) error {
 }
 
 func (t *tokVar) ParseExpression(tt *Tokenizer) error {
-	tt.cg.FetchVar(t.name)
+	tt.cg.FetchVar(t.varDesc)
 	tt.Next()
 	return nil
 }
@@ -379,8 +388,8 @@ func recognizeIdentifier(id *tokId, cg *CG) Token {
 			}
 		}
 		for _, v := range cg.vars {
-			if v == id.name {
-				return &tokVar{name: id.name}
+			if v.name == id.name {
+				return &tokVar{varDesc: v}
 			}
 		}
 		return id
