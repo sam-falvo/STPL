@@ -246,7 +246,9 @@ func handleLabel(l *Lexer) {
 		if f.Name != l.Token.Str {
 			ff = append(ff, f)
 		} else {
-			log.Printf("Resolving forward reference to %s at %04X", f.Name, f.Location)
+      hi := l.Image.I[f.Location] & 0xFF00
+      lo := (l.Image.I[f.Location] + uint16(l.Image.P)) & 0x00FF
+      l.Image.I[f.Location] = hi | lo
 		}
 	}
 	forwards = ff
@@ -265,11 +267,15 @@ func (l *Lexer) parseEffectiveAddress() (int64, int64) {
 		if l.Error != nil {
 			return -1, -1
 		}
+	} else {
+		// No explicit base register specified; assume PC-relative addressing given absolute symbol value.
+		displacement = displacement - int64(l.Image.P + 1)
 	}
 	if (indexReg < 0) || (indexReg > 3) {
 		l.Error = fmt.Errorf("%d: Index register must be 0, 1, 2, or 3.", l.Line)
 		return -1, -1
 	}
+  log.Printf("Returning %d(%d)", displacement, indexReg)
 	return displacement, indexReg
 }
 
@@ -364,6 +370,14 @@ func handleJMP(l *Lexer) {
 	l.Next()
 	displacement, indexReg := l.parseEffectiveAddress()
 	if l.Error != nil {
+		return
+	}
+	if displacement < -128 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
+		return
+	}
+	if displacement > 127 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
 		return
 	}
 	l.Error = l.Image.AsmWord(uint16((indexReg << 8) | (displacement & 0xFF)))
