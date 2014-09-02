@@ -193,7 +193,7 @@ func (l *Lexer) lexNumber() {
 	}
 	l.Token.Kind = NumberKind
 	l.Token.Str = string(name)
-	l.Token.I, l.Error = strconv.ParseInt(l.Token.Str, 0, 16)
+	l.Token.I, l.Error = strconv.ParseInt(l.Token.Str, 0, 0)
 }
 
 func (l *Lexer) Next() {
