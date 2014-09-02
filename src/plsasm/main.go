@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"encoding/binary"
 )
 
 const (
@@ -31,6 +32,10 @@ const (
 	DSZKind
 	JMPKind
 	JSRKind
+
+	// Pseudo-opcodes
+	DCWKind
+	DCBKind
 )
 
 type Token struct {
@@ -40,12 +45,27 @@ type Token struct {
 	B    byte
 }
 
+type Image struct {
+	I []uint16
+	P int
+}
+
+func (i *Image) AsmWord(w uint16) error {
+	if i.P < len(i.I) {
+		i.I[i.P] = w
+		i.P++
+		return nil
+	}
+	return fmt.Errorf("Attempt to assemble more than %d bytes", len(i.I))
+}
+
 type Lexer struct {
 	Source   io.Reader
 	NextChar []byte
 	Token
 	Line  int
 	Error error
+	Image
 }
 
 type Label struct {
@@ -58,7 +78,6 @@ var (
 	leds              map[int]func(*Lexer) int64
 	labels            []Label
 	forwards          []Label
-	loc               int
 )
 
 func isWhitespace(b byte) bool {
@@ -79,6 +98,9 @@ func (l *Lexer) EatByte() {
 func (l *Lexer) SkipComment() {
 	l.EatByte() // Eat ;
 	for {
+		if l.Error != nil {
+			break
+		}
 		if l.NextChar[0] == '\n' {
 			break
 		}
@@ -113,6 +135,15 @@ func isNameChar(b byte) bool {
 }
 
 func (l *Lexer) lexName() {
+	keywords := map[string]int{
+		"lda": LDAKind,
+		"sta": STAKind,
+		"isz": ISZKind,
+		"dsz": DSZKind,
+		"jmp": JMPKind,
+		"jsr": JSRKind,
+		"dcw": DCWKind,
+	}
 	name := make([]byte, 1)
 	name[0] = l.NextChar[0]
 	l.EatByte()
@@ -128,19 +159,9 @@ func (l *Lexer) lexName() {
 	}
 	l.Token.Kind = NameKind
 	l.Token.Str = string(name)
-	switch strings.ToLower(l.Token.Str) {
-	case "lda":
-		l.Token.Kind = LDAKind
-	case "sta":
-		l.Token.Kind = STAKind
-	case "isz":
-		l.Token.Kind = ISZKind
-	case "dsz":
-		l.Token.Kind = DSZKind
-	case "jmp":
-		l.Token.Kind = JMPKind
-	case "jsr":
-		l.Token.Kind = JSRKind
+	k, ok := keywords[strings.ToLower(l.Token.Str)]
+	if ok {
+		l.Token.Kind = k
 	}
 }
 
@@ -176,11 +197,16 @@ func (l *Lexer) lexNumber() {
 }
 
 func (l *Lexer) Next() {
+	if l.Token.Kind == EofKind {
+		l.Error = io.EOF
+		return
+	}
 	l.Token.Kind = 0
 	l.SkipWhitespace()
 	if l.Error != nil {
 		if l.Error == io.EOF {
 			l.Token.Kind = EofKind
+			l.Error = nil
 		}
 		return
 	}
@@ -202,6 +228,9 @@ func NewLexer(s io.Reader) *Lexer {
 	l := &Lexer{
 		Source:   s,
 		NextChar: []byte{10},
+		Image: Image{
+			I: make([]uint16, 65536),
+		},
 	}
 	l.Next()
 	return l
@@ -210,7 +239,7 @@ func NewLexer(s io.Reader) *Lexer {
 func handleLabel(l *Lexer) {
 	labels = append(labels, Label{
 		Name: l.Token.Str,
-		Location: loc,
+		Location: l.Image.P,
 	})
 	ff := make([]Label, 0)
 	for _, f := range forwards {
@@ -225,24 +254,14 @@ func handleLabel(l *Lexer) {
 }
 
 func (l *Lexer) parseEffectiveAddress() (int64, int64) {
-	handler, supported := leds[l.Token.Kind]
-	if !supported {
-		l.Error = fmt.Errorf("%d: Effective Address expression expected at \"%s\"", l.Line, l.Token.Str)
-		return -1, -1
-	}
-	displacement := handler(l)
+	displacement := l.parseExpression("Effective address")
 	if l.Error != nil {
 		return -1, -1
 	}
 	indexReg := int64(1)	// Default to PC
 	if (l.Token.Kind == CharKind) && (l.Token.B == ',') {
 		l.Next()
-		handler, supported = leds[l.Token.Kind]
-		if !supported {
-			l.Error = fmt.Errorf("%d: Index register expression expected at \"%s\"", l.Line, l.Token.Str)
-			return -1, -1
-		}
-		indexReg = handler(l)
+		indexReg = l.parseExpression("Index register")
 		if l.Error != nil {
 			return -1, -1
 		}
@@ -254,14 +273,38 @@ func (l *Lexer) parseEffectiveAddress() (int64, int64) {
 	return displacement, indexReg
 }
 
-func handleLDA(l *Lexer) {
-	l.Next()
+func (l *Lexer) parseExpression(kind string) int64 {
 	handler, supported := leds[l.Token.Kind]
 	if !supported {
-		l.Error = fmt.Errorf("%d: Destination register expression expected at \"%s\"", l.Line, l.Token.Str)
+		l.Error = fmt.Errorf("%d: %s expression expected at \"%s\"", l.Line, kind, l.Token.Str)
+		return -1
+	}
+	value := handler(l)
+	if l.Error != nil {
+		return -1
+	}
+	return value
+}
+
+func (l *Lexer) RequireComma(something string) {
+	if (l.Token.Kind != CharKind) || (l.Token.B != ',') {
+		l.Error = fmt.Errorf("%d: Comma followed by %s expected at \"%s\"", l.Line, something, l.Token.Str)
 		return
 	}
-	destReg := handler(l)
+	l.Next()
+}
+
+func (l *Lexer) PeekComma() bool {
+	if (l.Token.Kind == CharKind) && (l.Token.B == ',') {
+		l.Next()
+		return true
+	}
+	return false
+}
+
+func handleLDA(l *Lexer) {
+	l.Next()
+	destReg := l.parseExpression("Destination register")
 	if l.Error != nil {
 		return
 	}
@@ -269,17 +312,52 @@ func handleLDA(l *Lexer) {
 		l.Error = fmt.Errorf("%d: Destination register must be 0, 1, 2, or 3.", l.Line)
 		return
 	}
-	if (l.Token.Kind != CharKind) || (l.Token.B != ',') {
-		l.Error = fmt.Errorf("%d: Comma followed by effective Address expression expected at \"%s\"", l.Line, l.Token.Str)
+	l.RequireComma("effective address expression")
+	if l.Error != nil {
 		return
 	}
-	l.Next()
 	displacement, indexReg := l.parseEffectiveAddress()
 	if l.Error != nil {
 		return
 	}
-	log.Printf("%04X LDA AC%d, %d, %s", loc, destReg, displacement, ([]string{"0", "PC", "AC2", "AC3"})[indexReg])
-	loc++
+	if displacement < -128 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
+		return
+	}
+	if displacement > 127 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
+		return
+	}
+	l.Error = l.Image.AsmWord(uint16(0x2000 | (destReg << 11) | (indexReg << 8) | (displacement & 0xFF)))
+}
+
+func handleSTA(l *Lexer) {
+	l.Next()
+	srcReg := l.parseExpression("Source register")
+	if l.Error != nil {
+		return
+	}
+	if (srcReg < 0) || (srcReg > 3) {
+		l.Error = fmt.Errorf("%d: Source register must be 0, 1, 2, or 3.", l.Line)
+		return
+	}
+	l.RequireComma("effective address expression")
+	if l.Error != nil {
+		return
+	}
+	displacement, indexReg := l.parseEffectiveAddress()
+	if l.Error != nil {
+		return
+	}
+	if displacement < -128 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
+		return
+	}
+	if displacement > 127 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
+		return
+	}
+	l.Error = l.Image.AsmWord(uint16(0x4000 | (srcReg << 11) | (indexReg << 8) | (displacement & 0xFF)))
 }
 
 func handleJMP(l *Lexer) {
@@ -288,8 +366,7 @@ func handleJMP(l *Lexer) {
 	if l.Error != nil {
 		return
 	}
-	log.Printf("%04X JMP %d, %s", loc, displacement, ([]string{"0", "PC", "AC2", "AC3"})[indexReg])
-	loc++
+	l.Error = l.Image.AsmWord(uint16((indexReg << 8) | (displacement & 0xFF)))
 }
 
 func handleNumber(l *Lexer) int64 {
@@ -299,22 +376,45 @@ func handleNumber(l *Lexer) int64 {
 }
 
 func handleForwardRef(l *Lexer) int64 {
+	for _, lab := range labels {
+		if lab.Name == l.Token.Str {
+			return int64(lab.Location)
+		}
+	}
 	forwards = append(forwards, Label{
 		Name:     l.Token.Str,
-		Location: loc,
+		Location: l.Image.P,
 	})
 	l.Next()
 	return 0
 }
 
-func assemble(s io.Reader) error {
+func handleDCW(l *Lexer) {
+	l.Next()
+	for {
+		l.Error = l.Image.AsmWord(uint16(l.parseExpression("An")))
+		if l.Error != nil {
+			break
+		}
+		if l.Token.Kind == EofKind {
+			break
+		}
+		if !l.PeekComma() {
+			break
+		}
+	}
+}
+
+func assemble(s io.Reader) (*Image, error) {
 	labels = make([]Label, 0)
 	forwards = make([]Label, 0)
 
 	statementHandlers = map[int]func(*Lexer){
 		NameKind: handleLabel,
 		LDAKind:  handleLDA,
+		STAKind:  handleSTA,
 		JMPKind:  handleJMP,
+		DCWKind:  handleDCW,
 	}
 
 	leds = map[int]func(*Lexer) int64{
@@ -322,18 +422,32 @@ func assemble(s io.Reader) error {
 		NameKind:   handleForwardRef,
 	}
 
-	loc = 0
 	l := NewLexer(s)
 	for {
+		if l.Token.Kind == EofKind {
+			break
+		}
 		if l.Error != nil {
-			return l.Error
+			return nil, l.Error
 		}
 		handler, supported := statementHandlers[l.Token.Kind]
 		if !supported {
-			return fmt.Errorf("%d: Unknown directive or opcode at \"%s\"", l.Line, l.Token.Str)
+			return nil, fmt.Errorf("%d: Unknown directive or opcode at \"%s\"", l.Line, l.Token.Str)
 		}
 		handler(l)
 	}
+	if len(forwards) != 0 {
+		unique := make(map[string]bool)
+		log.Printf("Unresolved references:")
+		for _, f := range forwards {
+			if !unique[f.Name] {
+				log.Printf("   %s", f.Name)
+				unique[f.Name] = true
+			}
+		}
+		return nil, fmt.Errorf("Please resolve unresolved references.")
+	}
+	return &l.Image, nil
 }
 
 func main() {
@@ -351,7 +465,16 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.Close()
-	err = assemble(s)
+	img, err := assemble(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+	f, err := os.Create("a.out")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	err = binary.Write(f, binary.BigEndian, img.I[:img.P])
 	if err != nil {
 		log.Fatal(err)
 	}
