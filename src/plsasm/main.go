@@ -246,31 +246,42 @@ func handleLabel(l *Lexer) {
 		if f.Name != l.Token.Str {
 			ff = append(ff, f)
 		} else {
-			log.Printf("Resolving forward reference to %s at %04X", f.Name, f.Location)
+      hi := l.Image.I[f.Location] & 0xFF00
+      lo := (l.Image.I[f.Location] + uint16(l.Image.P)) & 0x00FF
+      l.Image.I[f.Location] = hi | lo
 		}
 	}
 	forwards = ff
 	l.Next()
 }
 
-func (l *Lexer) parseEffectiveAddress() (int64, int64) {
+func (l *Lexer) parseEffectiveAddress() (int64, int64, bool) {
+	isIndirect := false
+	if (l.Token.Kind == CharKind) && (l.Token.B == '@') {
+		isIndirect = true
+		l.Next()
+	}
 	displacement := l.parseExpression("Effective address")
 	if l.Error != nil {
-		return -1, -1
+		return -1, -1, false
 	}
 	indexReg := int64(1)	// Default to PC
 	if (l.Token.Kind == CharKind) && (l.Token.B == ',') {
 		l.Next()
 		indexReg = l.parseExpression("Index register")
 		if l.Error != nil {
-			return -1, -1
+			return -1, -1, false
 		}
+	} else {
+		// No explicit base register specified; assume PC-relative addressing given absolute symbol value.
+		displacement = displacement - int64(l.Image.P + 1)
 	}
 	if (indexReg < 0) || (indexReg > 3) {
 		l.Error = fmt.Errorf("%d: Index register must be 0, 1, 2, or 3.", l.Line)
-		return -1, -1
+		return -1, -1, false
 	}
-	return displacement, indexReg
+  log.Printf("Returning %d(%d)", displacement, indexReg)
+	return displacement, indexReg, isIndirect
 }
 
 func (l *Lexer) parseExpression(kind string) int64 {
@@ -302,71 +313,68 @@ func (l *Lexer) PeekComma() bool {
 	return false
 }
 
-func handleLDA(l *Lexer) {
-	l.Next()
+func commonLDASTA(l *Lexer) uint16 {
+	l.Next()	// eat opcode
 	destReg := l.parseExpression("Destination register")
 	if l.Error != nil {
-		return
+		return 0
 	}
 	if (destReg < 0) || (destReg > 3) {
 		l.Error = fmt.Errorf("%d: Destination register must be 0, 1, 2, or 3.", l.Line)
-		return
+		return 0
 	}
 	l.RequireComma("effective address expression")
 	if l.Error != nil {
-		return
+		return 0
 	}
-	displacement, indexReg := l.parseEffectiveAddress()
+	displacement, indexReg, isIndirect := l.parseEffectiveAddress()
 	if l.Error != nil {
-		return
+		return 0
 	}
 	if displacement < -128 {
 		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
-		return
+		return 0
 	}
 	if displacement > 127 {
 		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
-		return
+		return 0
 	}
-	l.Error = l.Image.AsmWord(uint16(0x2000 | (destReg << 11) | (indexReg << 8) | (displacement & 0xFF)))
+	indirectMask := int64(0)
+	if isIndirect {
+		indirectMask = 1 << 10
+	}
+	return uint16((destReg << 11) | indirectMask | (indexReg << 8) | (displacement & 0xFF))
+}
+
+func handleLDA(l *Lexer) {
+	opcode := commonLDASTA(l)
+	l.Error = l.Image.AsmWord(0x2000 | opcode)
 }
 
 func handleSTA(l *Lexer) {
-	l.Next()
-	srcReg := l.parseExpression("Source register")
-	if l.Error != nil {
-		return
-	}
-	if (srcReg < 0) || (srcReg > 3) {
-		l.Error = fmt.Errorf("%d: Source register must be 0, 1, 2, or 3.", l.Line)
-		return
-	}
-	l.RequireComma("effective address expression")
-	if l.Error != nil {
-		return
-	}
-	displacement, indexReg := l.parseEffectiveAddress()
-	if l.Error != nil {
-		return
-	}
-	if displacement < -128 {
-		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
-		return
-	}
-	if displacement > 127 {
-		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
-		return
-	}
-	l.Error = l.Image.AsmWord(uint16(0x4000 | (srcReg << 11) | (indexReg << 8) | (displacement & 0xFF)))
+	opcode := commonLDASTA(l)
+	l.Error = l.Image.AsmWord(0x4000 | opcode)
 }
 
 func handleJMP(l *Lexer) {
 	l.Next()
-	displacement, indexReg := l.parseEffectiveAddress()
+	displacement, indexReg, isIndirect := l.parseEffectiveAddress()
 	if l.Error != nil {
 		return
 	}
-	l.Error = l.Image.AsmWord(uint16((indexReg << 8) | (displacement & 0xFF)))
+	if displacement < -128 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (less than -128)", l.Line)
+		return
+	}
+	if displacement > 127 {
+		l.Error = fmt.Errorf("%d: Displacement out of range (greater than 127)", l.Line)
+		return
+	}
+  opcode := uint16((indexReg << 8) | (displacement & 0xFF))
+  if isIndirect {
+    opcode = opcode | (1 << 10)
+  }
+	l.Error = l.Image.AsmWord(opcode)
 }
 
 func handleNumber(l *Lexer) int64 {
