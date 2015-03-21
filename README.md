@@ -1,13 +1,21 @@
 STPL
 ====
 
-STPL stands for Sam's Toy Programming Language.
+STPL stands for Sam's Toy Programming Language.  It's pronounced the same as "staple."
 
-This is an attempt to write a compiler for some kind of language using a
+Originally, this was an attempt to write a compiler for some kind of language using a
 completely hand-rolled LR parser.  Although not Kestrel-related, I used the
 S16X4's instruction set as a starting point for the compiler's output.  The
 output produced is hypothetical, though -- it will not run on real hardware
 without an additional assembly step with some predefined macros.
+
+Today, this repo is more or less used as a dumping ground for language/compiler ideas
+until such time as I develop something a bit more serious and realistic.  Since the latest Kestrel
+design idea targets the RISC-V instruction set architecture, over time, I'll slowly be
+migrating STPL to that environment.
+
+What follows is of historical interest only.  STPL v2.0, if I ever get there, will almost
+certainly be *very* different than what's documented here.
 
 Rationale
 ---------
