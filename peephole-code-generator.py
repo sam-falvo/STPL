@@ -15,14 +15,14 @@ def new_label_name():
 
 
 class BEQ(Insn):
-    def __init__(self, r1, r2, dest):
+    def __init__(self, r1, r2, label):
         self.opc = "beq"
         self.src1 = r1
         self.src2 = r2
-        self.dest = dest
+        self.label = label
 
     def __repr__(self):
-        return "\tbeq\tX{}, X{}, {}".format(self.src1, self.src2, self.dest.name)
+        return "\tbeq\tX{}, X{}, {}".format(self.src1, self.src2, self.label.name)
 
 
 class Label(Insn):
@@ -78,6 +78,12 @@ class ORI(ImmInsn):
 class ADDI(ImmInsn):
     def __init__(self, dest, src, imm):
         self.opc = "addi"
+        self.reset(dest, src, imm)
+
+
+class XORI(ImmInsn):
+    def __init__(self, dest, src, imm):
+        self.opc = "xori"
         self.reset(dest, src, imm)
 
 
@@ -337,6 +343,10 @@ class Optimizer(object):
         rd = self.regs_dstack[0]
         self.I.append(ADDI(rd, rd, imm))
 
+    def xor_imm(self, imm):
+        rd = self.regs_dstack[0]
+        self.I.append(XORI(rd, rd, imm))
+
     def subroutine(self, name):
         self.commit(); self.optimize()
         l = Label(name)
@@ -396,11 +406,31 @@ class Optimizer(object):
                 self.I = self.I[:-2]
                 self.add_imm(n1)
                 return True
-            elif i0.opc in ["ld", "sd"] and i1.opc == "ori" and i1.imm12 == 0 and i0.index == i1.dest:
-                if i0.opc == "ld":
-                    i = LD(i0.dest, i0.offset, i1.src1)
-                else:
-                    i = SD(i0.src, i0.offset, i1.src1)
+            if i0.opc == "xor" and i1.is_small_const():
+                n1 = i1.imm12
+                self.I = self.I[:-2]
+                self.xor_imm(n1)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "ld" and i0.index == i1.dest:
+                i = LD(i0.dest, i0.offset, i1.src1)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "sd" and i0.index == i1.dest:
+                i = SD(i0.src, i0.offset, i1.src1)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "sd" and i0.src == i1.dest:
+                i = SD(i1.src1, i0.offset, i0.index)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc in ["add", "xor"] and i0.dest == i0.src1 and i0.src2 == i1.dest:
+                if i0.opc == "add":
+                    i = ADD(i0.dest, i0.dest, i1.src1)
+                elif i0.opc == "xor":
+                    i = XOR(i0.dest, i0.dest, i1.src1)
                 self.I = self.I[:-2]
                 self.I.append(i)
                 return True
@@ -409,7 +439,11 @@ class Optimizer(object):
                 self.I = self.I[:-2]
                 self.I.append(i)
                 return True
-
+            elif i1.opc == "xor" and i1.dest == i1.src1 and i0.opc == "beq" and i0.src1 == i1.src1 and i0.src2 == 0:
+                i = BEQ(i1.src1, i1.src2, i0.label)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
         return False
 
     def dump(self):
