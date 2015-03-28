@@ -1,0 +1,252 @@
+
+
+
+
+
+
+
+
+Virtual Machine Model:
+
+	X0	Always 0 (imposed by hardware).
+
+	X1	Return Address (aka Return Stack Cache)
+	X2	Return Stack Pointer
+
+	X3	Data Stack Cache
+	X4	Data Stack Pointer
+
+	X5-X30	Allocated as-needed for data or return stack caching
+
+	X31	Global Pointer
+
+	PC	Program Counter
+
+
+
+
+
+
+
+
+Two basic stack operations:  Push and Pop.
+
+
+When 1 or more registers map to items on the stack,
+
+	On PUSH x:
+
+	IF   registers available for use,
+	THEN pick one, and emit instructions to assign x to that register.
+	ELSE either error, or spill register.  (I choose to error.)
+
+	On POP:
+	
+	Free the most recently allocated register.
+	(This is the register which is known to represent the top of stack.
+	Note that this includes X3!)
+
+	In addition, emit instruction that uses the freed register.
+	This "consumes" the data it holds.
+	
+
+When NO more registers are in use,
+
+	On PUSH x:
+	
+	IF   registers available for use,
+	THEN pick one, and emit instructions to assign x to that register.
+	ELSE either error, or spill register.  (I choose to error.)
+
+	On POP:
+	
+	Add 1 word to compiler's knowledge of where DSP should point to.
+	Do not (yet) generate any instructions though.
+
+
+
+
+
+
+
+When Generating Instructions,
+
+	APPEND them to a list.
+	then OPTIMIZE the list as much as possible.
+
+
+
+
+
+Analogous to a Shift/Reduce Parser:
+
+	SHIFT next input token onto evaluation stack.
+	then REDUCE the evaluation stack as much as possible.
+
+
+
+
+They work the same way:
+
+	To OPTIMIZE the instruction list,
+	
+	BEGIN
+		Perform a single optimization.
+		Was it successful?
+	WHILE REPEAT
+
+
+
+
+
+	To Perform a Single Optimization Step,
+	
+	FOR P in all known optimization patterns DO
+		LET l = pattern length of P
+		IF l most recently appended instructions match P THEN
+			REPLACE those with P's designated replacement.
+			RETURN TRUE
+		END
+	END
+	RETURN FALSE.
+
+
+
+
+
+For example:
+
+        elif i1.opc == "ori" and i0.opc == "and" and i0.src2 == i1.dest:
+            i = ANDI(i0.dest, i0.src1, i1.imm12)
+            self.I = self.I[:-2]
+            self.I.append(i)
+        elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "andi" and
+	             	i0.dest == i1.dest:
+            i = ANDI(i0.dest, i1.src1, i0.imm12)
+            self.I = self.I[:-2]
+            self.I.append(i)
+        elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc in ["add", "xor"] and
+        		i0.dest == i0.src1 and i0.src2 == i1.dest:
+            if i0.opc == "add":
+                i = ADD(i0.dest, i0.dest, i1.src1)
+            elif i0.opc == "xor":
+                i = XOR(i0.dest, i0.dest, i1.src1)
+            self.I = self.I[:-2]
+            self.I.append(i)
+            return True
+
+
+
+
+Total of 10 cases yields VERY optimal results.
+
+
+
+
+
+Example 1: Unsigned Multiply, the Simple Way
+
+Forth:
+
+	: mul0 ( a 0 b -- c=a*b )
+		DUP IF >R OVER + R> 1- RECURSE EXIT THEN DROP NIP ;
+
+	: mul32x32u ( a b -- c=a*b )
+		0 SWAP mul0 ;
+
+
+
+Generated Assembly Listing:
+
+	mul0:
+		beq	X3, X0, L1
+		ld	X5, 0(X4)
+		ld	X6, 8(X4)
+		add	X5, X5, X6
+		addi	X3, X3, -1
+		sd	X6, 8(X4)
+		sd	X5, 0(X4)
+		jal	X0, umul0
+	L1:
+		ld	X3, 0(X4)
+		ld	X5, 8(X4)
+		addi	X4, X4, 16
+		jalr	X0, 0(X1)
+
+	mul32x32u:
+		ori	X5, X0, 0
+		sd	X5, -8(X4)
+		addi	X4, X4, -8
+		jal	X0, umul0
+
+
+
+
+Example 2: Unsigned Multiply, the Clever Way
+
+Forth:
+
+	: m	DUP 1 AND IF >R OVER + R> THEN 2/ >R >R 2* R> R> ;
+
+	: 8m	m m m m m m m m ;
+
+	: mul32x32u ( a b -- c=a*b )
+		0 SWAP 8m 8m 8m 8m ;
+
+
+Generated Assembly Listing:
+
+m:
+	andi	X5, X3, 1
+	beq	X5, X0, L1
+	ld	X5, 0(X4)
+	ld	X6, 8(X4)
+	add	X5, X5, X6
+	sd	X6, 8(X4)
+	sd	X5, 0(X4)
+L1:
+	srai	X3, X3, 1
+	ld	X5, 0(X4)
+	ld	X6, 8(X4)
+	slli	X6, X6, 1
+	sd	X6, 8(X4)
+	sd	X5, 0(X4)
+	jalr	X0, 0(X1)
+
+8m:
+	jal	X1, m
+	jal	X1, m
+	jal	X1, m
+	jal	X1, m
+	jal	X1, m
+	jal	X1, m
+	jal	X1, m
+	jal	X0, m
+
+mul32x32u:
+	ori	X5, X0, 0
+	sd	X5, -8(X4)
+	addi	X4, X4, -8
+	jal	X1, 8m
+	jal	X1, 8m
+	jal	X1, 8m
+	jal	X0, 8m
+
+
+
+
+Example 3: Print an 8x8 pixel character to a bitmap.
+
+Forth:
+
+	: rows ( pChar pBitmap n -- )
+		DUP 8 XOR IF DROP DROP DROP EXIT THEN
+		OVER C@ OVER C!  80 + SWAP 256 + SWAP  RECURSE ;
+
+	: plotch ( pChar pBitmap -- )
+		8 rows ;
+
+
+Generated Assembly Language:
+
+
