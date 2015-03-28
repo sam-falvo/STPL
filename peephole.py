@@ -221,13 +221,13 @@ class Optimizer(object):
         self.I = []
         self.regs_rstack = []
         self.rsp_offset = 0
-        self.regs_avail = [self.D0, self.D1, self.D2, self.D3, self.D4, self.D5, self.D6, self.D7]
         self.gp_base = None
         self.reset_dstack()
         self.ctrl = []
         self.current_subroutine = None
 
     def reset_dstack(self):
+        self.regs_avail = [self.D0, self.D1, self.D2, self.D3, self.D4, self.D5, self.D6, self.D7]
         self.regs_dstack = [self.DC]
         self.dsp_offset = 0
 
@@ -485,7 +485,6 @@ class Optimizer(object):
         self.I.append(JAL(self.RA, self.current_subroutine))
 
     def optimize(self):
-        print(self.regs_dstack)
         while self.optimize_step():
             pass
 
@@ -592,38 +591,3 @@ class Optimizer(object):
             print(i)
         print("\n")
 
-o = Optimizer()
-o.subroutine("rows")
-
-o.dup(); o.optimize();
-o.literal(8); o.optimize();
-o.xor(); o.optimize();
-o.If(); o.optimize();
-o.drop(); o.optimize()
-o.drop(); o.optimize()
-o.drop(); o.optimize()
-o.rfs(); o.optimize()
-o.Then(); o.optimize()
-o.over(); o.optimize()
-o.cfetch(); o.optimize()
-o.over();o.optimize()
-o.cstore(); o.optimize()
-o.literal(80); o.optimize()
-o.add(); o.optimize()
-o.swap(); o.optimize()
-o.literal(256); o.optimize()
-o.add(); o.optimize()
-o.swap(); o.optimize()
-o.call("rows"); o.optimize()
-o.rfs(); o.optimize()
-
-o.commit(); o.dump();
-
-o = Optimizer()
-o.subroutine("plotch")
-
-o.literal(8); o.optimize()
-o.call("rows"); o.optimize()
-o.rfs(); o.optimize()
-
-o.commit(); o.dump();

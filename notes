@@ -4,24 +4,94 @@
 
 
 
+Observation:
+
+MISC and RISC execution units have similar numbers of transistors,
+since they're similar in overall complexity.
+
+Example:
+        F18A has 32 opcodes.
+        RV64I has only close to 50.
+
+Contrast:
+        6502 has 56 opcodes plus over 20 addressing modes.
+        68000 has 87 opcodes, plus slightly more than 8 addressing modes.
+        80386 has over 300 opcodes, plus over 50 addressing modes.
+
+Where they differ is in how operands are delivered *to* the execution units.
+
+        F18A has 16 registers configured as a ring buffer emulating a stack
+        RV64I has 32 addressible registers.
+
+
+I recall research showing RISCs spend as much time pushing parameters on and
+off the stack as a typical Forth application spends permuting its data stack.
+(Sorry; no sources at this time.)
+
+
+
+
+
+
+
+
+
+
+
+HYPOTHESIS:
+        It should be possible to get close to MISC-native performance with
+        RISC-V given that we utilize its registers as closely as possible to
+        how a MISC uses its internal stack registers.
+        
+
+
+
+
+
+
+
+
+GOAL:
+
+        Create a code generator that, at compile-time, allocates registers as
+        closely as possible to how MISC hardware allocates register resources
+        at run-time.
+
+
+
+
+
+
+
+Managing Expectations:
+
+        A compile-time system never has the whole picture, by definition.
+        It lacks knowledge of the run-time environment.
+        Therefore, we know that the compile-time approximation of MISC
+        runtime economies can never (for all cases) be equal to MISC.
+
+
+
+
+
+
 
 
 Virtual Machine Model:
 
-	X0	Always 0 (imposed by hardware).
+        X0      Always 0 (imposed by hardware).
 
-	X1	Return Address (aka Return Stack Cache)
-	X2	Return Stack Pointer
+        X1      Return Address (aka Return Stack Cache)
+        X2      Return Stack Pointer
 
-	X3	Data Stack Cache
-	X4	Data Stack Pointer
+        X3      Data Stack Cache
+        X4      Data Stack Pointer
 
-	X5-X30	Allocated as-needed for data or return stack caching
+        X5-X30  Allocated as-needed for data or return stack caching
 
-	X31	Global Pointer
+        X31     Global Pointer
 
-	PC	Program Counter
-
+        PC      Program Counter
 
 
 
@@ -32,37 +102,42 @@ Virtual Machine Model:
 Two basic stack operations:  Push and Pop.
 
 
-When 1 or more registers map to items on the stack,
 
-	On PUSH x:
 
-	IF   registers available for use,
-	THEN pick one, and emit instructions to assign x to that register.
-	ELSE either error, or spill register.  (I choose to error.)
 
-	On POP:
-	
-	Free the most recently allocated register.
-	(This is the register which is known to represent the top of stack.
-	Note that this includes X3!)
+On PUSH VALUE x:
 
-	In addition, emit instruction that uses the freed register.
-	This "consumes" the data it holds.
-	
+        IF   registers available for use,
+        THEN pick one, and emit instructions to assign x to that register.
+        ELSE either error, or spill register.  (I choose to error.)
 
-When NO more registers are in use,
 
-	On PUSH x:
-	
-	IF   registers available for use,
-	THEN pick one, and emit instructions to assign x to that register.
-	ELSE either error, or spill register.  (I choose to error.)
 
-	On POP:
-	
-	Add 1 word to compiler's knowledge of where DSP should point to.
-	Do not (yet) generate any instructions though.
 
+
+On POP though,
+
+
+        When 1 or more registers map to items on the stack,
+
+        Free the most recently allocated register.
+        (This is the register which is known to represent the top of stack.
+        Note that this includes X3!)
+
+        In addition, emit instruction that uses the freed register, if any.
+        This "consumes" the data it holds.
+        
+
+
+
+
+        When NO more registers are in use,
+
+        Add 1 word to compiler's knowledge of where DSP should point to.
+        If using the value, fetch first into a temporary register.
+        Then emit the instruction that consumes the value.
+        No need to "allocate" the register, since it's freed right away.
+        Just remember to use an unused register.  :)
 
 
 
@@ -71,8 +146,8 @@ When NO more registers are in use,
 
 When Generating Instructions,
 
-	APPEND them to a list.
-	then OPTIMIZE the list as much as possible.
+        APPEND them to a list.
+        then OPTIMIZE the list as much as possible.
 
 
 
@@ -80,35 +155,31 @@ When Generating Instructions,
 
 Analogous to a Shift/Reduce Parser:
 
-	SHIFT next input token onto evaluation stack.
-	then REDUCE the evaluation stack as much as possible.
+        SHIFT next input token onto evaluation stack.
+        then REDUCE the evaluation stack as much as possible.
 
 
 
 
 They work the same way:
 
-	To OPTIMIZE the instruction list,
-	
-	BEGIN
-		Perform a single optimization.
-		Was it successful?
-	WHILE REPEAT
+        To OPTIMIZE the instruction list,
+        
+        BEGIN
+                Perform a single optimization.
+                Was it successful?
+        WHILE REPEAT
 
-
-
-
-
-	To Perform a Single Optimization Step,
-	
-	FOR P in all known optimization patterns DO
-		LET l = pattern length of P
-		IF l most recently appended instructions match P THEN
-			REPLACE those with P's designated replacement.
-			RETURN TRUE
-		END
-	END
-	RETURN FALSE.
+        To Perform a Single Optimization Step,
+        
+        FOR P in all known optimization patterns DO
+                LET l = pattern length of P
+                IF l most recently appended instructions match P THEN
+                        REPLACE those with P's designated replacement.
+                        RETURN TRUE
+                END
+        END
+        RETURN FALSE.
 
 
 
@@ -120,13 +191,15 @@ For example:
             i = ANDI(i0.dest, i0.src1, i1.imm12)
             self.I = self.I[:-2]
             self.I.append(i)
+            return True
         elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "andi" and
-	             	i0.dest == i1.dest:
+                        i0.dest == i1.dest:
             i = ANDI(i0.dest, i1.src1, i0.imm12)
             self.I = self.I[:-2]
             self.I.append(i)
+            return True
         elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc in ["add", "xor"] and
-        		i0.dest == i0.src1 and i0.src2 == i1.dest:
+                        i0.dest == i0.src1 and i0.src2 == i1.dest:
             if i0.opc == "add":
                 i = ADD(i0.dest, i0.dest, i1.src1)
             elif i0.opc == "xor":
@@ -138,7 +211,7 @@ For example:
 
 
 
-Total of 10 cases yields VERY optimal results.
+Total of 10 cases yields surprisingly optimal results.
 
 
 
@@ -148,36 +221,36 @@ Example 1: Unsigned Multiply, the Simple Way
 
 Forth:
 
-	: mul0 ( a 0 b -- c=a*b )
-		DUP IF >R OVER + R> 1- RECURSE EXIT THEN DROP NIP ;
+        : mul0 ( a 0 b -- c=a*b )
+                DUP IF >R OVER + R> 1- RECURSE EXIT THEN DROP NIP ;
 
-	: mul32x32u ( a b -- c=a*b )
-		0 SWAP mul0 ;
+        : mul32x32u ( a b -- c=a*b )
+                0 SWAP mul0 ;
 
 
 
 Generated Assembly Listing:
 
-	mul0:
-		beq	X3, X0, L1
-		ld	X5, 0(X4)
-		ld	X6, 8(X4)
-		add	X5, X5, X6
-		addi	X3, X3, -1
-		sd	X6, 8(X4)
-		sd	X5, 0(X4)
-		jal	X0, umul0
-	L1:
-		ld	X3, 0(X4)
-		ld	X5, 8(X4)
-		addi	X4, X4, 16
-		jalr	X0, 0(X1)
+        mul0:
+                beq     X3, X0, L1
+                ld      X5, 0(X4)
+                ld      X6, 8(X4)
+                add     X5, X5, X6
+                addi    X3, X3, -1
+                sd      X6, 8(X4)         ; leak
+                sd      X5, 0(X4)
+                jal     X0, mul0
+        L1:
+                ld      X3, 0(X4)         ; leak
+                ld      X5, 8(X4)         ; leak
+                addi    X4, X4, 16
+                jalr    X0, 0(X1)
 
-	mul32x32u:
-		ori	X5, X0, 0
-		sd	X5, -8(X4)
-		addi	X4, X4, -8
-		jal	X0, umul0
+        mul32x32u:
+                ori     X5, X0, 0
+                sd      X5, -8(X4)
+                addi    X4, X4, -8
+                jal     X0, mul0
 
 
 
@@ -186,51 +259,51 @@ Example 2: Unsigned Multiply, the Clever Way
 
 Forth:
 
-	: m	DUP 1 AND IF >R OVER + R> THEN 2/ >R >R 2* R> R> ;
+        : m     DUP 1 AND IF >R OVER + R> THEN 2/ >R >R 2* R> R> ;
 
-	: 8m	m m m m m m m m ;
+        : 8m    m m m m m m m m ;
 
-	: mul32x32u ( a b -- c=a*b )
-		0 SWAP 8m 8m 8m 8m ;
+        : mul32x32u ( a b -- c=a*b )
+                0 SWAP 8m 8m 8m 8m ;
 
 
 Generated Assembly Listing:
 
 m:
-	andi	X5, X3, 1
-	beq	X5, X0, L1
-	ld	X5, 0(X4)
-	ld	X6, 8(X4)
-	add	X5, X5, X6
-	sd	X6, 8(X4)
-	sd	X5, 0(X4)
+        andi    X5, X3, 1
+        beq     X5, X0, L1
+        ld      X5, 0(X4)
+        ld      X6, 8(X4)
+        add     X5, X5, X6
+        sd      X6, 8(X4)   ; leak
+        sd      X5, 0(X4)
 L1:
-	srai	X3, X3, 1
-	ld	X5, 0(X4)
-	ld	X6, 8(X4)
-	slli	X6, X6, 1
-	sd	X6, 8(X4)
-	sd	X5, 0(X4)
-	jalr	X0, 0(X1)
+        srai    X3, X3, 1
+        ld      X5, 0(X4)   ; leak
+        ld      X6, 8(X4)
+        slli    X6, X6, 1
+        sd      X6, 8(X4)
+        sd      X5, 0(X4)   ; leak
+        jalr    X0, 0(X1)
 
 8m:
-	jal	X1, m
-	jal	X1, m
-	jal	X1, m
-	jal	X1, m
-	jal	X1, m
-	jal	X1, m
-	jal	X1, m
-	jal	X0, m
+        jal     X1, m
+        jal     X1, m
+        jal     X1, m
+        jal     X1, m
+        jal     X1, m
+        jal     X1, m
+        jal     X1, m
+        jal     X0, m
 
 mul32x32u:
-	ori	X5, X0, 0
-	sd	X5, -8(X4)
-	addi	X4, X4, -8
-	jal	X1, 8m
-	jal	X1, 8m
-	jal	X1, 8m
-	jal	X0, 8m
+        ori     X5, X0, 0
+        sd      X5, -8(X4)
+        addi    X4, X4, -8
+        jal     X1, 8m
+        jal     X1, 8m
+        jal     X1, 8m
+        jal     X0, 8m
 
 
 
@@ -239,14 +312,40 @@ Example 3: Print an 8x8 pixel character to a bitmap.
 
 Forth:
 
-	: rows ( pChar pBitmap n -- )
-		DUP 8 XOR IF DROP DROP DROP EXIT THEN
-		OVER C@ OVER C!  80 + SWAP 256 + SWAP  RECURSE ;
+        : rows ( pChar pBitmap n -- )
+                DUP 8 XOR IF DROP DROP DROP EXIT THEN
+                OVER C@ OVER C!  80 + SWAP 256 + SWAP  RECURSE ;
 
-	: plotch ( pChar pBitmap -- )
-		8 rows ;
+        : plotch ( pChar pBitmap -- )
+                8 rows ;
 
 
 Generated Assembly Language:
+
+        rows:
+                xori	X5, X3, 8
+                beq	X5, X0, L1
+                ld	X3, 16(X4)
+                addi	X4, X4, 24
+                jalr	X0, 0(X1)
+
+        L1:
+                ld	X5, 0(X4)
+                lb	X6, 0(X5)
+                sb	X6, 0(X3)
+                addi	X3, X3, 80
+                addi	X5, X5, 256
+                sd	X5, 0(X4)   ; leak
+                jal	X0, rows
+
+
+
+        plotch:
+                ori	X5, X0, 8
+                sd	X3, -8(X4)
+                ori	X3, X5, 0
+                addi	X4, X4, -8
+                jal	X0, rows
+
 
 
