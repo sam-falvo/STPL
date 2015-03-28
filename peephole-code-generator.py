@@ -14,6 +14,28 @@ def new_label_name():
     return "L{}".format(label_counter)
 
 
+class SRAI(Insn):
+    def __init__(self, rd, rs, imm12):
+        self.opc = "srai"
+        self.dest = rd
+        self.src1 = rs
+        self.imm12 = imm12
+
+    def __repr__(self):
+        return "\t{}\tX{}, X{}, {}".format(self.opc, self.dest, self.src1, self.imm12)
+
+
+class SLLI(Insn):
+    def __init__(self, rd, rs, imm12):
+        self.opc = "slli"
+        self.dest = rd
+        self.src1 = rs
+        self.imm12 = imm12
+
+    def __repr__(self):
+        return "\t{}\tX{}, X{}, {}".format(self.opc, self.dest, self.src1, self.imm12)
+
+
 class BEQ(Insn):
     def __init__(self, r1, r2, label):
         self.opc = "beq"
@@ -22,7 +44,7 @@ class BEQ(Insn):
         self.label = label
 
     def __repr__(self):
-        return "\tbeq\tX{}, X{}, {}".format(self.src1, self.src2, self.label.name)
+        return "\t{}\tX{}, X{}, {}".format(self.opc, self.src1, self.src2, self.label.name)
 
 
 class Label(Insn):
@@ -60,6 +82,17 @@ class XOR(Insn):
         return "\t{}\tX{}, X{}, X{}".format(self.opc, self.dest, self.src1, self.src2)
 
 
+class AND(Insn):
+    def __init__(self, dest, src1, src2):
+        self.opc = "and"
+        self.dest = dest
+        self.src1 = src1
+        self.src2 = src2
+
+    def __repr__(self):
+        return "\t{}\tX{}, X{}, X{}".format(self.opc, self.dest, self.src1, self.src2)
+
+
 class ImmInsn(Insn):
     def reset(self, dest, src, imm):
         self.dest = dest
@@ -81,6 +114,12 @@ class ADDI(ImmInsn):
         self.reset(dest, src, imm)
 
 
+class ANDI(ImmInsn):
+    def __init__(self, dest, src, imm):
+        self.opc = "andi"
+        self.reset(dest, src, imm)
+
+
 class XORI(ImmInsn):
     def __init__(self, dest, src, imm):
         self.opc = "xori"
@@ -96,6 +135,26 @@ class AUIPC(Insn):
     def __repr__(self):
         return "\t{}\tX{}, {}".format(self.opc, self.dest, self.imm20)
 
+
+class LB(Insn):
+    def __init__(self, dest, offset, index):
+        self.opc = "lb"
+        self.dest = dest
+        self.offset = offset
+        self.index = index
+
+    def __repr__(self):
+        return "\t{}\tX{}, {}(X{})".format(self.opc, self.dest, self.offset, self.index)
+
+class SB(Insn):
+    def __init__(self, src, offset, index):
+        self.opc = "sb"
+        self.src = src
+        self.offset = offset
+        self.index = index
+
+    def __repr__(self):
+        return "\t{}\tX{}, {}(X{})".format(self.opc, self.src, self.offset, self.index)
 
 class LD(Insn):
     def __init__(self, dest, offset, index):
@@ -255,6 +314,15 @@ class Optimizer(object):
             self.bind_s()
             self.xor()
 
+    def And(self):
+        if len(self.regs_dstack) >= 2:
+            rd = self.regs_dstack[1]
+            rs = self.pop_register()
+            self.I.append(AND(rd, rd, rs))
+        else:
+            self.bind_s()
+            self.And()
+
     def add(self):
         if len(self.regs_dstack) >= 2:
             rd = self.regs_dstack[1]
@@ -263,6 +331,25 @@ class Optimizer(object):
         else:
             self.bind_s()
             self.add()
+
+    def cfetch(self):
+        if len(self.regs_dstack) >= 1:
+            rd = self.regs_dstack[0]
+            self.I.append(LB(rd, 0, rd))
+        else:
+            self.bind_s()
+            self.cfetch()
+
+    def cstore(self):
+        if len(self.regs_dstack) >= 2:
+            rs = self.regs_dstack[1]
+            rd = self.regs_dstack[0]
+            self.I.append(SB(rs, 0, rd))
+            self.pop_register()
+            self.pop_register()
+        else:
+            self.bind_s()
+            self.cstore()
 
     def fetch(self):
         if len(self.regs_dstack) >= 1:
@@ -339,6 +426,22 @@ class Optimizer(object):
         self.drop(); self.optimize()
 
 
+    def div2(self):
+        if len(self.regs_dstack) >= 1:
+            rd = self.regs_dstack[0]
+            self.I.append(SRAI(rd, rd, 1))
+        else:
+            self.bind_s()
+            self.div2()
+
+    def mul2(self):
+        if len(self.regs_dstack) >= 1:
+            rd = self.regs_dstack[0]
+            self.I.append(SLLI(rd, rd, 1))
+        else:
+            self.bind_s()
+            self.mul2()
+
     def add_imm(self, imm):
         rd = self.regs_dstack[0]
         self.I.append(ADDI(rd, rd, imm))
@@ -382,6 +485,7 @@ class Optimizer(object):
         self.I.append(JAL(self.RA, self.current_subroutine))
 
     def optimize(self):
+        print(self.regs_dstack)
         while self.optimize_step():
             pass
 
@@ -426,6 +530,41 @@ class Optimizer(object):
                 self.I = self.I[:-2]
                 self.I.append(i)
                 return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "lb" and i0.index == i1.dest:
+                i = LB(i0.dest, i0.offset, i1.src1)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "sb" and i0.index == i1.dest:
+                i = SB(i0.src, i0.offset, i1.src1)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "sb" and i0.src == i1.dest:
+                i = SB(i1.src1, i0.offset, i0.index)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i0.opc == "beq" and i0.src1 == i1.dest:
+                i = BEQ(i1.src1, i0.src2, i0.label)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i0.opc == "and" and i0.src2 == i1.dest:
+                i = ANDI(i0.dest, i0.src1, i1.imm12)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "andi" and i0.dest == i1.dest:
+                i = ANDI(i0.dest, i1.src1, i0.imm12)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
+            elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc == "xori" and i0.dest == i1.dest:
+                i = XORI(i0.dest, i1.src1, i0.imm12)
+                self.I = self.I[:-2]
+                self.I.append(i)
+                return True
             elif i1.opc == "ori" and i1.imm12 == 0 and i0.opc in ["add", "xor"] and i0.dest == i0.src1 and i0.src2 == i1.dest:
                 if i0.opc == "add":
                     i = ADD(i0.dest, i0.dest, i1.src1)
@@ -454,29 +593,37 @@ class Optimizer(object):
         print("\n")
 
 o = Optimizer()
-o.subroutine("cls0")
-o.literal(65536); o.optimize()
-o.over(); o.optimize()
-o.xor(); o.optimize()
-o.If(); o.optimize()
-o.literal(0); o.optimize()
-o.over(); o.optimize()
-o.store(); o.optimize()
-o.literal(8); o.optimize()
-o.add(); o.optimize()
-o.recurse(); o.optimize()
-o.rfs(); o.optimize()
-o.Then(); o.optimize()
+o.subroutine("rows")
+
+o.dup(); o.optimize();
+o.literal(8); o.optimize();
+o.xor(); o.optimize();
+o.If(); o.optimize();
+o.drop(); o.optimize()
+o.drop(); o.optimize()
 o.drop(); o.optimize()
 o.rfs(); o.optimize()
-
-o.commit(); o.dump()
-
-o = Optimizer()
-o.subroutine("cls")
-o.literal(49152); o.optimize()
-o.call("cls0"); o.optimize()
+o.Then(); o.optimize()
+o.over(); o.optimize()
+o.cfetch(); o.optimize()
+o.over();o.optimize()
+o.cstore(); o.optimize()
+o.literal(80); o.optimize()
+o.add(); o.optimize()
+o.swap(); o.optimize()
+o.literal(256); o.optimize()
+o.add(); o.optimize()
+o.swap(); o.optimize()
+o.call("rows"); o.optimize()
 o.rfs(); o.optimize()
 
-o.commit(); o.dump()
+o.commit(); o.dump();
 
+o = Optimizer()
+o.subroutine("plotch")
+
+o.literal(8); o.optimize()
+o.call("rows"); o.optimize()
+o.rfs(); o.optimize()
+
+o.commit(); o.dump();
