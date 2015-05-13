@@ -32,6 +32,9 @@ mkEnum([
     # in the name field.  If a character, its ordinal number is in the value
     # field, and the kind has the Character flag set.
     "String",
+
+    # Punctuation: left parenthesis symbol
+    "LParen",
 ])
 
 
@@ -129,6 +132,26 @@ class Scanner(object):
             self.name = self.name + self._source.get()
             ch = self._source.peek()
             
+    def skipComment(self):
+        """Skips over comments in the source code.  Note that comments nest."""
+        self._source.get()
+        ch = self._source.peek()
+        while True:
+            if ch is cstream.CSEOF:
+                raise Exception("Unexpected EOF while skipping comments")
+            elif ch == '(':
+                self._source.get(); ch = self._source.peek()
+                if ch == '*':
+                    self.skipComment()
+            elif ch == '*':
+                self._source.get(); ch = self._source.peek()
+                if ch == ')':
+                    self._source.get()
+                    return
+            else:
+                self._source.get()
+                ch = self._source.peek()
+
     def getSymbol(self):
         """
         Interpret the next token from the current input stream.  Adjust
@@ -156,6 +179,14 @@ class Scanner(object):
 
         if ch == '"':
             return self.getString()
+
+        if ch == '(':
+            self._source.get(); ch = self._source.peek()
+            if ch == '*':
+                self.skipComment()
+                return self.getSymbol()
+            self.name = "("
+            return LParen
 
         return Unknown
 

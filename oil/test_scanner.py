@@ -54,6 +54,11 @@ class TestScanner(unittest.TestCase):
             text="i  helloWorld\nOberon07\n\t\t\ti18n"
         )
 
+    def testSkipsComments(self):
+        return self.testIdentifiersInSequence(
+            text="i (*'d like to say*)helloWorld (*to (*the*)*) Oberon07 i18n"
+        )
+
     def testNumbers(self, source="12345", value=12345, kind=scanner.Cardinal):
         source = StringIO.StringIO(source)
         s = scanner.Scanner(source=source, filename="<>")
