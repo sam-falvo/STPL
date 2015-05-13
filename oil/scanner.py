@@ -114,7 +114,6 @@ class Scanner(object):
 
     def getString(self):
         """Reads a string from the input stream."""
-        self.kind = 0
         self._source.get()
         ch = self._source.peek()
         while True:
@@ -137,6 +136,9 @@ class Scanner(object):
         kind of token.
         """
         self.name = ""
+        self.kind = 0
+        self.value = 0
+
         ch = self._source.peek()
 
         if ch in lowercaseLetters:
