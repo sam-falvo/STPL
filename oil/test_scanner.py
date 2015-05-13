@@ -74,6 +74,17 @@ class TestScanner(unittest.TestCase):
             kind=scanner.Cardinal|scanner.Character
         )
 
+    def testStrings(self):
+        source = StringIO.StringIO("\"h\" \"elloWorld\"")
+        s = scanner.Scanner(source=source, filename="<>")
+        self.assertEquals(s.getSymbol(), scanner.String)
+        self.assertEquals(s.kind, scanner.Character)
+        self.assertEquals(s.name, "h")
+        self.assertEquals(s.value, ord("h"))
+        self.assertEquals(s.getSymbol(), scanner.String)
+        self.assertEquals(s.kind, 0)
+        self.assertEquals(s.name, "elloWorld")
+
 
 if __name__ == "__main__":
     unittest.main()

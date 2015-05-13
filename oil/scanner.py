@@ -27,6 +27,11 @@ mkEnum([
     # Its textual representation can be found via the name field, as it's
     # written in the source program.
     "Number",
+
+    # String or character discovered.  Its literal representation is available
+    # in the name field.  If a character, its ordinal number is in the value
+    # field, and the kind has the Character flag set.
+    "String",
 ])
 
 
@@ -107,6 +112,24 @@ class Scanner(object):
             self.kind = Cardinal
         return Number
 
+    def getString(self):
+        """Reads a string from the input stream."""
+        self.kind = 0
+        self._source.get()
+        ch = self._source.peek()
+        while True:
+            if ch == '"':
+                self._source.get()
+                if len(self.name) == 1:
+                    self.kind = Character
+                    self.value = ord(self.name[0])
+                return String
+            if ch is cstream.CSEOF:
+                raise Exception("End of string detected")
+
+            self.name = self.name + self._source.get()
+            ch = self._source.peek()
+            
     def getSymbol(self):
         """
         Interpret the next token from the current input stream.  Adjust
@@ -128,6 +151,9 @@ class Scanner(object):
 
         if ch in digits:
             return self.getNumber()
+
+        if ch == '"':
+            return self.getString()
 
         return Unknown
 
