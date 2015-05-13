@@ -54,29 +54,25 @@ class TestScanner(unittest.TestCase):
             text="i  helloWorld\nOberon07\n\t\t\ti18n"
         )
 
-    def testDecimalNumbers(self):
-        source = StringIO.StringIO("12345")
+    def testNumbers(self, source="12345", value=12345, kind=scanner.Cardinal):
+        source = StringIO.StringIO(source)
         s = scanner.Scanner(source=source, filename="<>")
         self.assertEquals(s.getSymbol(), scanner.Number)
-        self.assertEquals(s.kind, scanner.Cardinal)
-        self.assertEquals(s.value, 12345)
-
+        self.assertEquals(s.kind, kind)
+        self.assertEquals(s.value, value)
+        
     def testHexNumbers(self):
-        source = StringIO.StringIO("12345H 0FFFFFFFFFFFFFFFFh")
-        s = scanner.Scanner(source=source, filename="<>")
-        self.assertEquals(s.getSymbol(), scanner.Number)
-        self.assertEquals(s.kind, scanner.Cardinal)
-        self.assertEquals(s.value, 0x12345)
-        self.assertEquals(s.getSymbol(), scanner.Number)
-        self.assertEquals(s.kind, scanner.Cardinal)
-        self.assertEquals(s.value, 0xFFFFFFFFFFFFFFFF)
+        self.testNumbers(source="12345H", value=0x12345)
+        return self.testNumbers(
+            source="0FFFFFFFFFFFFFFFFh",
+            value=0xFFFFFFFFFFFFFFFF
+        )
 
     def testCharNumbers(self):
-        source = StringIO.StringIO("12345X")
-        s = scanner.Scanner(source=source, filename="<>")
-        self.assertEquals(s.getSymbol(), scanner.Number)
-        self.assertEquals(s.kind, scanner.Character | scanner.Cardinal)
-        self.assertEquals(s.value, 0x12345)
+        return self.testNumbers(
+            source="45X", value=0x45,
+            kind=scanner.Cardinal|scanner.Character
+        )
 
 
 if __name__ == "__main__":
