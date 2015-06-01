@@ -35,6 +35,10 @@ mkEnum([
 
     # Punctuation: left parenthesis symbol
     "LParen",
+
+    # Punctuation: negative, minus, plus, etc.
+    "Minus",
+    "Plus",
 ])
 
 
@@ -66,6 +70,13 @@ class Scanner(object):
         self._filename = filename or "<unspecified>"
         self._line = 0
         self.name = ""
+        self.errors = []
+
+    def mark(self, msg):
+        self.errors.append("{}:{}:{}".format(self._filename, self._line, msg))
+
+    def hasErrors(self):
+        return len(self.errors) != 0
 
     def currentFilename(self):
         """Report the current source file.  Typically for error reporting."""
@@ -188,5 +199,14 @@ class Scanner(object):
             self.name = "("
             return LParen
 
+        if ch in ['-', '+']:
+            self._source.get()
+            self.name = ch
+            return self.chToTokenMap[ch]
+
         return Unknown
 
+    chToTokenMap = {
+        "-": Minus,
+        "+": Plus,
+    }
