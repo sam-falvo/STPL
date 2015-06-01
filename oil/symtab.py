@@ -1,6 +1,6 @@
 import attr
 
-from parser import Item
+from psg_attr import Item
 
 
 @attr.s

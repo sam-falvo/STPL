@@ -1,23 +1,7 @@
 import attr
 
 import scanner
-
-
-@attr.s
-class Item(object):
-    """Attributes for in-flight expressions."""
-    typ = attr.ib(default=None)
-    cls = attr.ib(default=None)
-    a = attr.ib(default=None)
-
-    # Types
-    Unknown = 0
-    Integer = 1
-
-    # Classes
-    Constant = 1
-    Global = 2
-    Register = 3
+from psg_attr import Item
 
 
 @attr.s
