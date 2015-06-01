@@ -5,17 +5,8 @@ import unittest
 import attr
 
 
+from parser import Item
 from symtab import SymTab
-
-
-@attr.s
-class Item(object):
-    # Stub until we merge with master
-    typ = attr.ib(default=None)
-    cls = attr.ib(default=None)
-    a = attr.ib(default=None)
-
-    Unknown = 0
 
 
 class TestSymTab(unittest.TestCase):
