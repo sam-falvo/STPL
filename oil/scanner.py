@@ -37,8 +37,10 @@ mkEnum([
     "LParen",
 
     # Punctuation: negative, minus, plus, etc.
-    "Minus",
-    "Plus",
+    "Minus", "Plus",
+
+    # Punctuation: relations.
+    "Less", "LessEq", "Equal", "NotEqual", "Greater", "GreaterEq",
 ])
 
 
@@ -199,7 +201,29 @@ class Scanner(object):
             self.name = "("
             return LParen
 
-        if ch in ['-', '+']:
+        if ch == '<':
+            self._source.get(); ch = self._source.peek()
+            if ch != '=':
+                self._source.get()
+                self.name = "<"
+                return Less
+            else:
+                self._source.get()
+                self.name = "<="
+                return LessEq
+
+        if ch == '>':
+            self._source.get(); ch = self._source.peek()
+            if ch != '=':
+                self._source.get()
+                self.name = ">"
+                return Greater
+            else:
+                self._source.get()
+                self.name = ">="
+                return GreaterEq
+
+        if ch in ['-', '+', '=', '#']:
             self._source.get()
             self.name = ch
             return self.chToTokenMap[ch]
@@ -207,6 +231,6 @@ class Scanner(object):
         return Unknown
 
     chToTokenMap = {
-        "-": Minus,
-        "+": Plus,
+        "-": Minus, "+": Plus,
+        "=": Equal, "#": NotEqual,
     }

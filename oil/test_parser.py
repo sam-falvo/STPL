@@ -5,7 +5,7 @@ import unittest
 
 from parser import (Parser, Item)
 from cstream import CSFileLike
-from scanner import Scanner
+from scanner import (Scanner, Equal, LessEq)
 
 
 CSFileLike.register(StringIO.StringIO)
@@ -92,6 +92,42 @@ class TestParser(unittest.TestCase):
         self.assertEquals(i.typ, Item.Integer)
         self.assertEquals(i.cls, Item.Global)
         self.assertEquals(i.a, 8)
+
+    def testRelations(self):
+        class MySymtab(object):
+            def lookup(self, i, name):
+                i.typ = Item.Integer; i.cls = Item.Global
+                if name == 'p':
+                    i.a = 8
+                elif name == 'q':
+                    i.a = 16
+                else:
+                    i.typ = Item.Unknown
+
+        class MyCG(object):
+            def __init__(self):
+                self.rh = 2
+
+            def load(self, i):
+                if i.cls == Item.Register:
+                    return  # already loaded.
+                elif i.cls == Item.Global:
+                    print("\tld\tx{}, {}(gp)".format(self.rh, i.a))
+                    i.cls = Item.Register
+                    i.a = self.rh
+                    self.rh = self.rh + 1
+                else:
+                    print("Unknown load {}".format(i))
+
+        s = scannerFor("p <= q"); st = MySymtab(); cg = MyCG()
+        p = Parser(scanner=s, symtab=st, cg=cg); p.scan()
+        i = Item()
+        p.Expression(i)
+        self.assertEquals(i.typ, Item.Boolean)
+        self.assertEquals(i.cls, Item.Compare)
+        self.assertEquals(i.a, 2)
+        self.assertEquals(i.b, 3)
+        self.assertEquals(i.op, LessEq)
 
     def testGlobalArithmetic(self):
         class MySymtab(object):

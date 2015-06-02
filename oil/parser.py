@@ -14,6 +14,24 @@ class Parser(object):
     def scan(self):
         self.nextToken = self.scanner.getSymbol()
 
+    def Expression(self, i):
+        self.SimpleExpression(i)
+        while self.nextToken in [
+            scanner.Less, scanner.LessEq,
+            scanner.Equal, scanner.NotEqual,
+            scanner.Greater, scanner.GreaterEq
+        ]:
+            op = self.nextToken; self.scan()
+            j = Item()
+            self.SimpleExpression(j)
+            if (i.typ == Item.Integer) and (j.typ == Item.Integer):
+                self.cg.load(i); self.cg.load(j)
+                i.typ = Item.Boolean; i.cls = Item.Compare
+                i.op = op
+                i.b = j.a
+            else:
+                self.scanner.mark("Type mismatch")
+
     def SimpleExpression(self, i):
         self.Factor(i)
         while self.nextToken in [scanner.Minus, scanner.Plus]:

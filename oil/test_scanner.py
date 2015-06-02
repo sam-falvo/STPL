@@ -90,6 +90,16 @@ class TestScanner(unittest.TestCase):
         self.assertEquals(s.kind, 0)
         self.assertEquals(s.name, "elloWorld")
 
+    def testRelations(self):
+        source = StringIO.StringIO("< <= = # > >=")
+        s = scanner.Scanner(source=source, filename="<>")
+        self.assertEquals(s.getSymbol(), scanner.Less)
+        self.assertEquals(s.getSymbol(), scanner.LessEq)
+        self.assertEquals(s.getSymbol(), scanner.Equal)
+        self.assertEquals(s.getSymbol(), scanner.NotEqual)
+        self.assertEquals(s.getSymbol(), scanner.Greater)
+        self.assertEquals(s.getSymbol(), scanner.GreaterEq)
+
 
 if __name__ == "__main__":
     unittest.main()
