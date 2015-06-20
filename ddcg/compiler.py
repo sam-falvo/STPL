@@ -172,9 +172,14 @@ class Compiler(object):
                 for p in x.params:
                         r = self.allocRegister()
                         self.cg(p, None, None, Register(r))
-                self.asm("\tjal\tx1, {}".format(x.f))
+                if ift == iff and ift is Return:
+                        self.asm("\tld\tx1, 0(sp)")
+                        self.asm("\taddi\tsp, sp, {}".format(self.frameSize))
+                        self.asm("\tjal\tx0, {}".format(x.f))
+                else:
+                        self.asm("\tjal\tx1, {}".format(x.f))
+                        self.goto(ift, iff, "bne", "beq")
                 self.popRegister(by=len(x.params))
-                self.goto(ift, iff, "bne", "beq")
 
         def cgPeekByte(self, x, ift, iff, dd):
                 if isinstance(dd, Register):
